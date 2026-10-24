@@ -123,8 +123,20 @@ function marker(place, color, height) {
 // Same link format as the 2D map: ?from=MU or ?from=ISTB4,SRC (group) and optional &to=LIB
 const params = new URLSearchParams(location.search);
 try {
-  const froms = (params.get("from") || "").split(",").filter(Boolean);
+  let froms = (params.get("from") || "").split(",").filter(Boolean);
   let to = params.get("to");
+  if (froms.includes("here")) {
+    // One position fix; the 2D map is the one that follows the student live.
+    info.textContent = "Finding your location…";
+    const pos = await new Promise((resolve, reject) => {
+      if (!navigator.geolocation) reject(new Error("This browser can't share its location."));
+      navigator.geolocation.getCurrentPosition(resolve, () => reject(new Error("Couldn't get your location.")),
+        { enableHighAccuracy: true, timeout: 20000 });
+    });
+    const here = campus.placeAt(pos.coords.latitude, pos.coords.longitude);
+    if (here.offMap) throw new Error("You're outside the campus model.");
+    froms = froms.map((f) => (f === "here" ? here : f));
+  }
   if (!froms.length) {
     info.innerHTML = `Drag to orbit, pinch or scroll to zoom. <a href="index.html">Plan a walk</a>`;
   } else {
@@ -138,10 +150,15 @@ try {
     });
     const dest = routes[0].to;
     marker(dest, "#111111", 12);
+    for (const p of [dest, ...routes.map((r) => r.from)]) all.expandByPoint(new THREE.Vector3(...toModel([p.lat, p.lon]), 3));
     const size = all.getSize(new THREE.Vector3());
-    look(all.getCenter(new THREE.Vector3()), Math.max(60, size.x, size.y) * 1.3);
+    // A narrow portrait screen needs the camera further back to fit the route's width, with extra margin
+    // because the tilted view spreads the near (south) end wider.
+    const portrait = camera.aspect < 1;
+    look(all.getCenter(new THREE.Vector3()),
+      Math.max(60, size.y, size.x / Math.min(1, camera.aspect)) * (portrait ? 1.9 : 1.4));
 
-    const back = `index.html?${new URLSearchParams({ from: froms.join(","), to: dest.id })}`;
+    const back = `index.html?${new URLSearchParams({ from: routes.map((r) => r.from.id).join(","), to: dest.id })}`;
     info.className = "";
     info.innerHTML = routes.length === 1
       ? `<div class="summary">${routes[0].minutes} min walk</div>

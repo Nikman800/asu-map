@@ -53,6 +53,18 @@ export class CampusMap {
     return scored.slice(0, limit).map((s) => s[2]);
   }
 
+  // A starting point anywhere, such as the phone's location, joined to the nearest path.
+  // `offMap` is true when that path is too far away for the map to be any help.
+  placeAt(lat, lon, name = "Your location") {
+    let best = null;
+    let bestD = Infinity;
+    for (const id of this.adj.keys()) {
+      const d = distance([lat, lon], this.nodes[id]);
+      if (d < bestD) [best, bestD] = [id, d];
+    }
+    return { id: "here", name, aliases: [], lat, lon, doors: [[best, bestD]], offMap: bestD > 300 };
+  }
+
   // Shortest walking distances from a place (every door is a starting point) to every node.
   distancesFrom(place) {
     const dist = new Map();
@@ -105,7 +117,8 @@ export class CampusMap {
       legs.push({ name, kind, len, geom: a === p ? geom : [...geom].reverse() });
     }
     legs.reverse();
-    const path = legs.flatMap((l, i) => (i ? l.geom.slice(1) : l.geom));
+    // No legs when the start is already at the destination's door.
+    const path = legs.length ? legs.flatMap((l, i) => (i ? l.geom.slice(1) : l.geom)) : [this.nodes[door]];
     return {
       from, to,
       meters: Math.round(meters),
@@ -174,6 +187,14 @@ function describe(legs, destination) {
   });
   steps.push(`Arrive at ${destination}`);
   return steps;
+}
+
+// Metres between two [lat, lon] points.
+export function distance([lat1, lon1], [lat2, lon2]) {
+  const rad = Math.PI / 180;
+  const h = Math.sin(((lat2 - lat1) * rad) / 2) ** 2 +
+    Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(((lon2 - lon1) * rad) / 2) ** 2;
+  return 2 * 6371000 * Math.asin(Math.sqrt(h));
 }
 
 function heading([lat1, lon1], [lat2, lon2]) {

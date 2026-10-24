@@ -29,7 +29,12 @@ cd web && python3 -m http.server 8000
 # http://localhost:8000/?from=MU&to=LIB
 # http://localhost:8000/?from=ISTB4,SRC,tooker-house-a          (group: picks the meeting spot)
 # http://localhost:8000/3d.html?from=ISTB4,SRC,tooker-house-a
+# http://localhost:8000/?from=here&to=MU                         (live, from the phone's location)
 ```
+
+`from=here` starts from the phone's location: the page asks for permission, shows a live blue dot and re-plans
+the route every 15 m as the student walks ("Use my location" does the same). The position stays in the browser;
+the page is static and sends it nowhere. Browsers allow location only on https pages or localhost.
 
 Links use place ids (`MU`, `LIB`, `ISTB4`, `SRC`, or a name slug such as `tooker-house-a`); `find` lists them.
 Walking speed is 80 m per minute, and stairs count 30% longer.

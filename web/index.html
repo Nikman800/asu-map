@@ -35,8 +35,13 @@
   form { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
   input { grid-column: 1; width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px;
     background: var(--field); color: var(--fg); font: inherit; }
-  button { grid-column: 2; grid-row: 1 / span 2; padding: 0 16px; border: 0; border-radius: 10px;
+  form button { grid-column: 2; grid-row: 1 / span 2; padding: 0 16px; border: 0; border-radius: 10px;
     background: var(--accent); color: var(--accent-fg); font: inherit; font-weight: 600; cursor: pointer; }
+  .tools { display: flex; align-items: center; gap: 12px; margin-top: 8px; }
+  .ghost { padding: 7px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--field);
+    color: var(--fg); font: inherit; font-size: 14px; cursor: pointer; }
+  .tools label { color: var(--muted); font-size: 14px; display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .live { color: #1a73e8; font-size: 13px; }
   .hint { color: var(--muted); font-size: 13px; margin: 6px 0 0; }
   #result:empty { display: none; }
   #result { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 12px; }
@@ -60,17 +65,24 @@
     <input id="to" list="places" placeholder="To (leave empty to find a meeting spot)" aria-label="To">
     <button type="submit">Go</button>
   </form>
+  <div class="tools">
+    <button type="button" id="locate" class="ghost">◎ Use my location</button>
+    <label id="followWrap" hidden><input type="checkbox" id="follow" checked> Follow me</label>
+  </div>
   <p class="hint">Several starting points separated by commas plan a fair meeting spot for a group.</p>
   <datalist id="places"></datalist>
   <div id="result"></div>
-  <p class="credit">Map data © OpenStreetMap contributors</p>
+  <p class="credit">Map data © OpenStreetMap contributors. Your location stays on your phone.</p>
 </section>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script type="module">
-import { CampusMap } from "./route.js";
+import { CampusMap, distance } from "./route.js";
 
 const COLORS = ["#8c1d40", "#1565c0", "#2e7d32", "#ef6c00", "#6a1b9a", "#00838f"];
+const YOU = "#1a73e8";
+const REROUTE_M = 15;   // re-plan after moving this far
+const ARRIVED_M = 40;   // GPS is often off by 10-30 m
 const $ = (id) => document.getElementById(id);
 
 const map = L.map("map", { zoomControl: false, zoomSnap: 0.25 }).setView([33.4205, -111.932], 16);
@@ -79,6 +91,7 @@ L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
 }).addTo(map);
 const layer = L.layerGroup().addTo(map);
+const meLayer = L.layerGroup().addTo(map);
 
 const campus = new CampusMap(await (await fetch("campus.json")).json());
 $("places").innerHTML = campus.places.map((p) => `<option value="${esc(p.name)}">${esc(p.id)}</option>`).join("");
@@ -92,42 +105,156 @@ function pin(place, color, label) {
     .bindTooltip(label || place.name).addTo(layer);
 }
 
-function show(fromText, toText) {
+// The part of the map the panel doesn't cover: [left, top] and [right, bottom] padding in pixels.
+function visiblePadding() {
+  const covered = innerWidth < 720 ? $("panel").offsetHeight : 0;
+  const side = innerWidth >= 720 ? $("panel").offsetWidth + 16 : 0;
+  return { paddingTopLeft: [40 + side, 40], paddingBottomRight: [40, 40 + covered] };
+}
+
+// Centres a point in the visible part of the map.
+function centreOn(latlng, zoom = map.getZoom()) {
+  const { paddingTopLeft: [l, t], paddingBottomRight: [r, b] } = visiblePadding();
+  const shifted = map.project(latlng, zoom).add([(l - r) / -2, (b - t) / 2]);
+  map.setView(map.unproject(shifted, zoom), zoom);
+}
+
+// --- Location -------------------------------------------------------------------------------
+// The browser shares the position only with this page; nothing is sent anywhere.
+const HERE_WORDS = new Set(["here", "me", "my location", "current location", "your location"]);
+const isHere = (t) => HERE_WORDS.has(t.trim().toLowerCase());
+let here = null;        // the phone's position as a starting point
+let watchId = null;
+let lastRouted = null;  // where we were when the route was last drawn
+let current = null;     // the search on screen, re-run as the phone moves
+
+function startTracking() {
+  if (watchId !== null) return;
+  if (!navigator.geolocation) return showError("This browser can't share its location. Type where you're starting.");
+  $("locate").textContent = "◎ Finding you…";
+  watchId = navigator.geolocation.watchPosition(onPosition, onLocationError,
+    { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 });
+}
+
+function stopTracking() {
+  if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+  watchId = null;
+  here = lastRouted = null;
+  meLayer.clearLayers();
+  $("locate").textContent = "◎ Use my location";
+  $("followWrap").hidden = true;
+}
+
+function onPosition(pos) {
+  const { latitude: lat, longitude: lon, accuracy } = pos.coords;
+  const first = !here;
+  here = campus.placeAt(lat, lon);
+  meLayer.clearLayers();
+  L.circle([lat, lon], { radius: accuracy, color: YOU, weight: 1, fillOpacity: 0.12, interactive: false }).addTo(meLayer);
+  L.circleMarker([lat, lon], { radius: 8, color: "#fff", weight: 3, fillColor: YOU, fillOpacity: 1 })
+    .bindTooltip("You").addTo(meLayer);
+  $("locate").textContent = "◎ Stop tracking";
+  $("followWrap").hidden = false;
+
+  if (current?.usesHere) {
+    if (!lastRouted || distance(lastRouted, [lat, lon]) > REROUTE_M) {
+      lastRouted = [lat, lon];
+      show(current.from, current.to, { refit: first });
+    }
+    if (!first && $("follow").checked) centreOn([lat, lon]);
+  } else if (first) {
+    centreOn([lat, lon], 17);
+  }
+}
+
+function onLocationError(err) {
+  if (err.code === err.PERMISSION_DENIED) {
+    stopTracking();
+    return showError("Location is blocked for this page. Allow it in your browser's site settings, or type where you're starting.");
+  }
+  // Timeouts and lost signal are often brief (standing still, indoors): keep watching, and keep the last route.
+  if (!here) showError("Still looking for your location. Check that Location is on, or type where you're starting.");
+}
+
+$("locate").addEventListener("click", () => {
+  if (watchId !== null) {
+    stopTracking();
+    if (current?.usesHere) {
+      $("from").value = "";
+      $("result").innerHTML = "";
+      layer.clearLayers();
+      current = null;
+    }
+    return;
+  }
+  $("from").value = "My location";
+  if ($("to").value.trim()) show($("from").value, $("to").value);
+  else startTracking();
+});
+map.on("dragstart", () => ($("follow").checked = false));
+
+// --- Routes ---------------------------------------------------------------------------------
+function showError(message) {
+  $("result").innerHTML = `<p class="error">${esc(message)}</p>`;
+}
+
+function show(fromText, toText, { refit = true } = {}) {
   layer.clearLayers();
   const out = $("result");
   try {
-    const froms = fromText.split(",").map((s) => s.trim()).filter(Boolean);
-    if (!froms.length) throw new Error("Enter where you're starting from.");
+    const tokens = fromText.split(",").map((s) => s.trim()).filter(Boolean);
+    if (!tokens.length) throw new Error("Enter where you're starting from.");
+    const usesHere = tokens.some(isHere);
+    current = { from: fromText, to: toText, usesHere };
+    if (usesHere && !here) {
+      out.innerHTML = `<p class="sub">Finding your location…</p>`;
+      return startTracking();
+    }
+    const froms = tokens.map((t) => (isHere(t) ? here : t));
     let to = toText.trim();
     let intro = "";
     if (!to) {
       if (froms.length < 2) throw new Error("Enter a destination, or two or more starting points to find a meeting spot.");
-      const best = campus.meetup(froms).options[0];
-      to = best.place.id;
+      to = campus.meetup(froms).options[0].place.id;
       intro = `<div class="sub">Fairest meeting spot for the group</div>`;
     }
-    const routes = froms.map((f) => campus.route(f, to));
+    const dest = campus.findPlace(to);
+    if (!dest) throw new Error(`Unknown place: "${to}"`);
+    const gmaps = `https://www.google.com/maps/dir/?api=1${usesHere ? `&origin=${here.lat},${here.lon}` : ""}` +
+      `&destination=${dest.lat},${dest.lon}&travelmode=walking`;
+    if (usesHere && here.offMap) {
+      out.innerHTML = `<p>You're about ${(distance([here.lat, here.lon], [dest.lat, dest.lon]) / 1000).toFixed(1)} km
+        from ${esc(dest.name)}, outside this campus map.</p><p><a href="${gmaps}">Directions in Google Maps</a></p>`;
+      return;
+    }
+
+    const routes = froms.map((f) => campus.route(f, dest));
     const bounds = L.latLngBounds([]);
     routes.forEach((r, i) => {
-      const color = COLORS[i % COLORS.length];
+      const color = r.from === here ? YOU : COLORS[i % COLORS.length];
       L.polyline(r.path, { color, weight: 6, opacity: 0.85 }).addTo(layer);
-      pin(r.from, color);
+      if (r.from === here) {
+        // From the blue dot to the nearest path.
+        L.polyline([[here.lat, here.lon], r.path[0]], { color, weight: 4, dashArray: "4 8" }).addTo(layer);
+        bounds.extend([here.lat, here.lon]);
+      } else pin(r.from, color);
       r.path.forEach((p) => bounds.extend(p));
     });
-    const dest = routes[0].to;
     pin(dest, "#111", `${dest.name} (destination)`);
     bounds.extend([dest.lat, dest.lon]);
 
-    const gmaps = `https://www.google.com/maps/dir/?api=1&destination=${dest.lat},${dest.lon}&travelmode=walking`;
+    const live = usesHere ? `<div class="live">● Live: updates as you walk</div>` : "";
     if (routes.length === 1) {
       const r = routes[0];
-      out.innerHTML = `<div class="summary">${r.minutes} min walk</div>
-        <div class="sub">${esc(r.from.name)} → ${esc(r.to.name)} · ${r.meters} m</div>
-        <ol>${r.steps.map((s) => `<li>${esc(s)}</li>`).join("")}</ol>
-        <p><a href="${gmaps}">Open in Google Maps</a></p>`;
+      out.innerHTML = r.from === here && r.meters < ARRIVED_M
+        ? `<div class="summary">You're at ${esc(dest.name)}</div>`
+        : `<div class="summary">${r.minutes} min walk</div>${live}
+          <div class="sub">${esc(r.from.name)} → ${esc(dest.name)} · ${r.meters} m</div>
+          <ol>${r.steps.map((s) => `<li>${esc(s)}</li>`).join("")}</ol>
+          <p><a href="${gmaps}">Open in Google Maps</a></p>`;
     } else {
-      out.innerHTML = `${intro}<div class="summary">${esc(dest.name)}</div>
-        ${routes.map((r, i) => `<div class="who"><span class="dot" style="background:${COLORS[i % COLORS.length]}"></span>
+      out.innerHTML = `${intro}<div class="summary">${esc(dest.name)}</div>${live}
+        ${routes.map((r, i) => `<div class="who"><span class="dot" style="background:${r.from === here ? YOU : COLORS[i % COLORS.length]}"></span>
           ${esc(r.from.name)}: ${r.minutes} min</div>`).join("")}
         <p><a href="${gmaps}">Open in Google Maps</a></p>`;
     }
@@ -135,11 +262,9 @@ function show(fromText, toText) {
     history.replaceState(null, "", `?${params}`);
     out.insertAdjacentHTML("beforeend", `<p><a href="3d.html?${params}">View in 3D</a></p>`);
     // On a phone the panel covers the bottom of the map; fit the route into the part above it.
-    const covered = innerWidth < 720 ? $("panel").offsetHeight : 0;
-    const side = innerWidth >= 720 ? $("panel").offsetWidth + 16 : 0;
-    map.fitBounds(bounds, { paddingTopLeft: [40 + side, 40], paddingBottomRight: [40, 40 + covered] });
+    if (refit) map.fitBounds(bounds, visiblePadding());
   } catch (e) {
-    out.innerHTML = `<p class="error">${esc(e.message)}</p>`;
+    showError(e.message);
   }
 }
 
@@ -148,13 +273,13 @@ $("search").addEventListener("submit", (e) => {
   show($("from").value, $("to").value);
 });
 
-// Links carry place ids; show their names in the boxes.
+// Links carry place ids, or "here" for the phone's location; show names in the boxes.
 const params = new URLSearchParams(location.search);
-const named = (ids) => ids.split(",").map((q) => campus.findPlace(q)?.name || q).join(", ");
+const named = (ids) => ids.split(",").map((q) => (isHere(q) ? "My location" : campus.findPlace(q)?.name || q)).join(", ");
 if (params.get("from")) {
-  show(params.get("from"), params.get("to") || "");
   $("from").value = named(params.get("from"));
   $("to").value = params.get("to") ? named(params.get("to")) : "";
+  show(params.get("from"), params.get("to") || "");
 }
 </script>
 </body>
