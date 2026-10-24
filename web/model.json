@@ -1,0 +1,9 @@
+{
+  "origin_lat": 33.42200348159082,
+  "origin_lon": -111.9340038974609,
+  "m_per_mm": 9.977715045672433,
+  "rotation_deg": 0.08723446016847403,
+  "lat0": 33.421,
+  "matched_buildings": 195,
+  "median_error_m": 1.5
+}

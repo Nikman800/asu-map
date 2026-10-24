@@ -1,0 +1,43 @@
+{
+  "_help": "Hand edits applied on top of OpenStreetMap by tools/build_graph.py. See README.md.",
+  "map_url": "https://nikman800.github.io/asu-map/",
+  "meeting_spots": [
+    "MU",
+    "LIB",
+    "noble-science-and-engineering-library",
+    "SRC",
+    "student-pavilion",
+    "college-avenue-commons",
+    "creativity-commons",
+    "tooker-house-dining"
+  ],
+  "aliases": {
+    "MU": [
+      "the MU"
+    ],
+    "LIB": [
+      "Hayden",
+      "Hayden Lib"
+    ],
+    "SRC": [
+      "SDFC",
+      "the gym",
+      "rec center"
+    ],
+    "city-of-tempe-transportation-center": [
+      "Tempe Transportation Center",
+      "TTC"
+    ],
+    "brickyard-engineering": [
+      "Brickyard",
+      "BYENG"
+    ],
+    "noble-science-and-engineering-library": [
+      "Noble",
+      "Noble Library"
+    ]
+  },
+  "places": [],
+  "extra_paths": [],
+  "closed_ways": []
+}

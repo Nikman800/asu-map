@@ -1,0 +1,168 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ASU Campus 3D</title>
+<style>
+  :root { --bg: #ffffff; --fg: #1d1d1f; --muted: #6b6b70; --line: #e3e3e6; --accent: #8c1d40; --sky: #eef1f5; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg: #1c1c1e; --fg: #f2f2f4; --muted: #a1a1a8; --line: #333336; --accent: #ffc627; --sky: #121214; }
+  }
+  :root[data-theme="dark"] { --bg: #1c1c1e; --fg: #f2f2f4; --muted: #a1a1a8; --line: #333336; --accent: #ffc627; --sky: #121214; }
+  html, body { margin: 0; height: 100%; background: var(--sky); color: var(--fg);
+    font: 15px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; overflow: hidden; }
+  canvas { display: block; }
+  #panel { position: fixed; left: 16px; right: 16px; bottom: calc(16px + env(safe-area-inset-bottom)); background: var(--bg);
+    border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; box-shadow: 0 4px 20px rgba(0,0,0,.15); }
+  @media (min-width: 720px) { #panel { right: auto; bottom: auto; top: 16px; width: 340px; } }
+  .summary { font-size: 18px; font-weight: 700; }
+  .sub { color: var(--muted); }
+  .who { display: flex; align-items: center; gap: 8px; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; flex: none; }
+  a { color: var(--accent); }
+  .error { color: #c62828; }
+</style>
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<section id="panel"><div id="info" class="sub">Loading the 3D campus…</div></section>
+<script type="module">
+import * as THREE from "three";
+import { STLLoader } from "three/addons/loaders/STLLoader.js";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { CampusMap } from "./route.js";
+
+const COLORS = ["#8c1d40", "#1565c0", "#2e7d32", "#ef6c00", "#6a1b9a", "#00838f"];
+const ROAD_TOP = 2.6;      // model mm: base is 2.4, roads 2.53, buildings above
+const info = document.getElementById("info");
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+
+const [campusData, fit, geometry] = await Promise.all([
+  fetch("campus.json").then((r) => r.json()),
+  fetch("model.json").then((r) => r.json()),
+  new STLLoader().loadAsync("campus-model.stl"),
+]);
+const campus = new CampusMap(campusData);
+
+// lat/lon -> model millimetres, the inverse of tools/fit_stl.py.
+const cosLat = Math.cos((fit.lat0 * Math.PI) / 180);
+const rot = (-fit.rotation_deg * Math.PI) / 180;
+function toModel([lat, lon]) {
+  const x = ((lon - fit.origin_lon) * cosLat * 111320) / fit.m_per_mm;
+  const y = ((lat - fit.origin_lat) * 110574) / fit.m_per_mm;
+  return [x * Math.cos(rot) - y * Math.sin(rot), x * Math.sin(rot) + y * Math.cos(rot)];
+}
+
+// Colour each triangle by its height: ground, roads, then buildings from low to tall.
+const pos = geometry.attributes.position;
+const colors = new Float32Array(pos.count * 3);
+const ground = new THREE.Color("#e9e6df"), road = new THREE.Color("#9a9a9e");
+const low = new THREE.Color("#d9b48f"), tall = new THREE.Color("#8c1d40");
+const c = new THREE.Color();
+let zMax = 0;
+for (let i = 0; i < pos.count; i++) zMax = Math.max(zMax, pos.getZ(i));
+for (let i = 0; i < pos.count; i += 3) {
+  const z = Math.max(pos.getZ(i), pos.getZ(i + 1), pos.getZ(i + 2));
+  if (z < 2.5) c.copy(ground);
+  else if (z < ROAD_TOP) c.copy(road);
+  else c.lerpColors(low, tall, Math.min(1, (z - ROAD_TOP) / (zMax - ROAD_TOP)));
+  for (let k = 0; k < 3; k++) c.toArray(colors, (i + k) * 3);
+}
+geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+geometry.computeBoundingBox();
+const box = geometry.boundingBox;
+const center = box.getCenter(new THREE.Vector3());
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(getComputedStyle(document.documentElement).getPropertyValue("--sky").trim());
+scene.add(new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({ vertexColors: true })));
+scene.add(new THREE.HemisphereLight(0xffffff, 0x888888, 1.6));
+const sun = new THREE.DirectionalLight(0xffffff, 1.4);
+sun.position.set(-80, -120, 200);
+scene.add(sun);
+
+const camera = new THREE.PerspectiveCamera(40, innerWidth / innerHeight, 1, 2000);
+camera.up.set(0, 0, 1);
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+document.body.prepend(renderer.domElement);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.maxPolarAngle = Math.PI / 2.2;
+
+function look(target, span) {
+  controls.target.set(target.x, target.y, 3);
+  camera.position.set(target.x, target.y - span * 0.9, span * 0.9);
+  controls.update();
+}
+look(center, 220);
+
+function drawRoute(path, color) {
+  const pts = path.map((p) => new THREE.Vector3(...toModel(p), ROAD_TOP + 0.4));
+  const curve = new THREE.CatmullRomCurve3(pts, false, "centripetal", 0);
+  const tube = new THREE.Mesh(new THREE.TubeGeometry(curve, Math.max(8, pts.length * 3), 0.9, 6),
+    new THREE.MeshLambertMaterial({ color, emissive: color, emissiveIntensity: 0.35 }));
+  scene.add(tube);
+  return pts;
+}
+
+function marker(place, color, height) {
+  const [x, y] = toModel([place.lat, place.lon]);
+  const m = new THREE.Mesh(new THREE.ConeGeometry(2.2, 6, 16), new THREE.MeshLambertMaterial({ color }));
+  m.rotation.x = -Math.PI / 2;
+  m.position.set(x, y, height + 4);
+  scene.add(m);
+}
+
+// Same link format as the 2D map: ?from=MU or ?from=ISTB4,SRC (group) and optional &to=LIB
+const params = new URLSearchParams(location.search);
+try {
+  const froms = (params.get("from") || "").split(",").filter(Boolean);
+  let to = params.get("to");
+  if (!froms.length) {
+    info.innerHTML = `Drag to orbit, pinch or scroll to zoom. <a href="index.html">Plan a walk</a>`;
+  } else {
+    if (!to) to = campus.meetup(froms).options[0].place.id;
+    const routes = froms.map((f) => campus.route(f, to));
+    const all = new THREE.Box3();
+    routes.forEach((r, i) => {
+      const color = COLORS[i % COLORS.length];
+      drawRoute(r.path, color).forEach((p) => all.expandByPoint(p));
+      marker(r.from, color, ROAD_TOP);
+    });
+    const dest = routes[0].to;
+    marker(dest, "#111111", 12);
+    const size = all.getSize(new THREE.Vector3());
+    look(all.getCenter(new THREE.Vector3()), Math.max(60, size.x, size.y) * 1.3);
+
+    const back = `index.html?${new URLSearchParams({ from: froms.join(","), to: dest.id })}`;
+    info.className = "";
+    info.innerHTML = routes.length === 1
+      ? `<div class="summary">${routes[0].minutes} min walk</div>
+         <div class="sub">${esc(routes[0].from.name)} → ${esc(dest.name)}</div><a href="${back}">2D map and steps</a>`
+      : `<div class="summary">${esc(dest.name)}</div>` +
+        routes.map((r, i) => `<div class="who"><span class="dot" style="background:${COLORS[i % COLORS.length]}"></span>
+          ${esc(r.from.name)}: ${r.minutes} min</div>`).join("") + `<a href="${back}">2D map</a>`;
+  }
+} catch (e) {
+  info.innerHTML = `<span class="error">${esc(e.message)}</span>`;
+}
+
+addEventListener("resize", () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+renderer.setAnimationLoop(() => {
+  controls.update();
+  renderer.render(scene, camera);
+});
+</script>
+</body>
+</html>

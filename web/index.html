@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ASU Campus Walk</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1d1d1f; --muted: #6b6b70; --line: #e3e3e6; --accent: #8c1d40; --accent-fg: #ffffff;
+    --field: #f4f4f6;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #1c1c1e; --fg: #f2f2f4; --muted: #a1a1a8; --line: #333336; --accent: #ffc627; --accent-fg: #1c1c1e;
+      --field: #2a2a2d;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #1c1c1e; --fg: #f2f2f4; --muted: #a1a1a8; --line: #333336; --accent: #ffc627; --accent-fg: #1c1c1e;
+    --field: #2a2a2d;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg);
+    font: 15px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  #map { position: fixed; inset: 0; }
+  #panel { position: fixed; left: 0; right: 0; bottom: 0; z-index: 1000; background: var(--bg);
+    border-top: 1px solid var(--line); border-radius: 16px 16px 0 0; padding: 14px 16px calc(14px + env(safe-area-inset-bottom));
+    max-height: 55vh; overflow-y: auto; box-shadow: 0 -4px 20px rgba(0,0,0,.15); }
+  @media (min-width: 720px) {
+    #panel { left: 16px; right: auto; top: 16px; bottom: auto; width: 360px; border: 1px solid var(--line);
+      border-radius: 14px; max-height: calc(100vh - 32px); }
+  }
+  h1 { font-size: 17px; margin: 0 0 10px; }
+  form { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+  input { grid-column: 1; width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px;
+    background: var(--field); color: var(--fg); font: inherit; }
+  button { grid-column: 2; grid-row: 1 / span 2; padding: 0 16px; border: 0; border-radius: 10px;
+    background: var(--accent); color: var(--accent-fg); font: inherit; font-weight: 600; cursor: pointer; }
+  .hint { color: var(--muted); font-size: 13px; margin: 6px 0 0; }
+  #result:empty { display: none; }
+  #result { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 12px; }
+  .summary { font-size: 20px; font-weight: 700; }
+  .sub { color: var(--muted); margin-bottom: 8px; }
+  ol { margin: 0; padding-left: 20px; }
+  li { margin: 3px 0; }
+  .who { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+  .dot { width: 12px; height: 12px; border-radius: 50%; flex: none; }
+  .error { color: #c62828; }
+  a { color: var(--accent); }
+  .credit { color: var(--muted); font-size: 12px; margin-top: 10px; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<section id="panel">
+  <h1>ASU Campus Walk</h1>
+  <form id="search" autocomplete="off">
+    <input id="from" list="places" placeholder="From (e.g. MU, or ISTB4, SRC for a group)" aria-label="From">
+    <input id="to" list="places" placeholder="To (leave empty to find a meeting spot)" aria-label="To">
+    <button type="submit">Go</button>
+  </form>
+  <p class="hint">Several starting points separated by commas plan a fair meeting spot for a group.</p>
+  <datalist id="places"></datalist>
+  <div id="result"></div>
+  <p class="credit">Map data © OpenStreetMap contributors</p>
+</section>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script type="module">
+import { CampusMap } from "./route.js";
+
+const COLORS = ["#8c1d40", "#1565c0", "#2e7d32", "#ef6c00", "#6a1b9a", "#00838f"];
+const $ = (id) => document.getElementById(id);
+
+const map = L.map("map", { zoomControl: false, zoomSnap: 0.25 }).setView([33.4205, -111.932], 16);
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 19,
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+}).addTo(map);
+const layer = L.layerGroup().addTo(map);
+
+const campus = new CampusMap(await (await fetch("campus.json")).json());
+$("places").innerHTML = campus.places.map((p) => `<option value="${esc(p.name)}">${esc(p.id)}</option>`).join("");
+
+function esc(s) {
+  return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+}
+
+function pin(place, color, label) {
+  L.circleMarker([place.lat, place.lon], { radius: 8, color: "#fff", weight: 2, fillColor: color, fillOpacity: 1 })
+    .bindTooltip(label || place.name).addTo(layer);
+}
+
+function show(fromText, toText) {
+  layer.clearLayers();
+  const out = $("result");
+  try {
+    const froms = fromText.split(",").map((s) => s.trim()).filter(Boolean);
+    if (!froms.length) throw new Error("Enter where you're starting from.");
+    let to = toText.trim();
+    let intro = "";
+    if (!to) {
+      if (froms.length < 2) throw new Error("Enter a destination, or two or more starting points to find a meeting spot.");
+      const best = campus.meetup(froms).options[0];
+      to = best.place.id;
+      intro = `<div class="sub">Fairest meeting spot for the group</div>`;
+    }
+    const routes = froms.map((f) => campus.route(f, to));
+    const bounds = L.latLngBounds([]);
+    routes.forEach((r, i) => {
+      const color = COLORS[i % COLORS.length];
+      L.polyline(r.path, { color, weight: 6, opacity: 0.85 }).addTo(layer);
+      pin(r.from, color);
+      r.path.forEach((p) => bounds.extend(p));
+    });
+    const dest = routes[0].to;
+    pin(dest, "#111", `${dest.name} (destination)`);
+    bounds.extend([dest.lat, dest.lon]);
+
+    const gmaps = `https://www.google.com/maps/dir/?api=1&destination=${dest.lat},${dest.lon}&travelmode=walking`;
+    if (routes.length === 1) {
+      const r = routes[0];
+      out.innerHTML = `<div class="summary">${r.minutes} min walk</div>
+        <div class="sub">${esc(r.from.name)} → ${esc(r.to.name)} · ${r.meters} m</div>
+        <ol>${r.steps.map((s) => `<li>${esc(s)}</li>`).join("")}</ol>
+        <p><a href="${gmaps}">Open in Google Maps</a></p>`;
+    } else {
+      out.innerHTML = `${intro}<div class="summary">${esc(dest.name)}</div>
+        ${routes.map((r, i) => `<div class="who"><span class="dot" style="background:${COLORS[i % COLORS.length]}"></span>
+          ${esc(r.from.name)}: ${r.minutes} min</div>`).join("")}
+        <p><a href="${gmaps}">Open in Google Maps</a></p>`;
+    }
+    const params = new URLSearchParams({ from: routes.map((r) => r.from.id).join(","), to: dest.id });
+    history.replaceState(null, "", `?${params}`);
+    out.insertAdjacentHTML("beforeend", `<p><a href="3d.html?${params}">View in 3D</a></p>`);
+    // On a phone the panel covers the bottom of the map; fit the route into the part above it.
+    const covered = innerWidth < 720 ? $("panel").offsetHeight : 0;
+    const side = innerWidth >= 720 ? $("panel").offsetWidth + 16 : 0;
+    map.fitBounds(bounds, { paddingTopLeft: [40 + side, 40], paddingBottomRight: [40, 40 + covered] });
+  } catch (e) {
+    out.innerHTML = `<p class="error">${esc(e.message)}</p>`;
+  }
+}
+
+$("search").addEventListener("submit", (e) => {
+  e.preventDefault();
+  show($("from").value, $("to").value);
+});
+
+// Links carry place ids; show their names in the boxes.
+const params = new URLSearchParams(location.search);
+const named = (ids) => ids.split(",").map((q) => campus.findPlace(q)?.name || q).join(", ");
+if (params.get("from")) {
+  show(params.get("from"), params.get("to") || "");
+  $("from").value = named(params.get("from"));
+  $("to").value = params.get("to") ? named(params.get("to")) : "";
+}
+</script>
+</body>
+</html>
