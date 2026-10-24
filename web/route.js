@@ -38,6 +38,8 @@ export class CampusMap {
     if (!q) return [];
     if (this.index.has(q)) return [this.index.get(q)];
     const words = q.split(" ");
+    // Class locations come as "<building code> <room>", e.g. "PSF 101" or "ECG G237".
+    if (words.length === 2 && /\d/.test(words[1]) && this.index.has(words[0])) return [this.index.get(words[0])];
     const scored = [];
     for (const p of this.places) {
       const keys = [p.id, p.name, ...p.aliases].map(norm);

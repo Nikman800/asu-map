@@ -35,6 +35,12 @@ cd web && python3 -m http.server 8000
 `from=here` starts from the phone's location: the page asks for permission, shows a live blue dot and re-plans
 the route every 15 m as the student walks ("Use my location" does the same). The position stays in the browser;
 the page is static and sends it nowhere. Browsers allow location only on https pages or localhost.
+Add `fallback=<place>` to start from that place while there is no GPS fix or if location is blocked;
+`route.mjs route <from> <to> --live` prints such a link, and the Cubbie Skill sends it in reminders.
+
+Places can be looked up by ASU building code with or without a room ("PSF 101", "ECG G237", "COOR 170"). Codes
+missing from OpenStreetMap are listed under `aliases` in `data/overrides.json`; check new ones against ASU's
+building list before adding them.
 
 Links use place ids (`MU`, `LIB`, `ISTB4`, `SRC`, or a name slug such as `tooker-house-a`); `find` lists them.
 Walking speed is 80 m per minute, and stairs count 30% longer.

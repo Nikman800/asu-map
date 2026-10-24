@@ -127,6 +127,20 @@ let here = null;        // the phone's position as a starting point
 let watchId = null;
 let lastRouted = null;  // where we were when the route was last drawn
 let current = null;     // the search on screen, re-run as the phone moves
+// Reminder links say where the student is probably starting (?fallback=PSF): used until, or instead of, a GPS fix.
+const fallback = (() => {
+  const id = new URLSearchParams(location.search).get("fallback");
+  return id ? campus.findPlace(id) : null;
+})();
+const FALLBACK_AFTER_MS = 8000;
+let useFallback = false;
+
+function switchToFallback() {
+  if (here || useFallback || !fallback) return false;
+  useFallback = true;
+  if (current?.usesHere) show(current.from, current.to);
+  return true;
+}
 
 function startTracking() {
   if (watchId !== null) return;
@@ -170,10 +184,11 @@ function onPosition(pos) {
 function onLocationError(err) {
   if (err.code === err.PERMISSION_DENIED) {
     stopTracking();
+    if (switchToFallback()) return;
     return showError("Location is blocked for this page. Allow it in your browser's site settings, or type where you're starting.");
   }
   // Timeouts and lost signal are often brief (standing still, indoors): keep watching, and keep the last route.
-  if (!here) showError("Still looking for your location. Check that Location is on, or type where you're starting.");
+  if (!here && !switchToFallback() && !useFallback) showError("Still looking for your location. Check that Location is on, or type where you're starting.");
 }
 
 $("locate").addEventListener("click", () => {
@@ -206,11 +221,14 @@ function show(fromText, toText, { refit = true } = {}) {
     if (!tokens.length) throw new Error("Enter where you're starting from.");
     const usesHere = tokens.some(isHere);
     current = { from: fromText, to: toText, usesHere };
-    if (usesHere && !here) {
+    if (usesHere && !here && !useFallback) {
       out.innerHTML = `<p class="sub">Finding your location…</p>`;
+      if (fallback) setTimeout(switchToFallback, FALLBACK_AFTER_MS);
       return startTracking();
     }
-    const froms = tokens.map((t) => (isHere(t) ? here : t));
+    // Until there is a GPS fix (or if location is off), start from the fallback place.
+    const start = here || fallback;
+    const froms = tokens.map((t) => (isHere(t) ? start : t));
     let to = toText.trim();
     let intro = "";
     if (!to) {
@@ -220,9 +238,9 @@ function show(fromText, toText, { refit = true } = {}) {
     }
     const dest = campus.findPlace(to);
     if (!dest) throw new Error(`Unknown place: "${to}"`);
-    const gmaps = `https://www.google.com/maps/dir/?api=1${usesHere ? `&origin=${here.lat},${here.lon}` : ""}` +
+    const gmaps = `https://www.google.com/maps/dir/?api=1${usesHere && here ? `&origin=${here.lat},${here.lon}` : ""}` +
       `&destination=${dest.lat},${dest.lon}&travelmode=walking`;
-    if (usesHere && here.offMap) {
+    if (usesHere && here?.offMap) {
       out.innerHTML = `<p>You're about ${(distance([here.lat, here.lon], [dest.lat, dest.lon]) / 1000).toFixed(1)} km
         from ${esc(dest.name)}, outside this campus map.</p><p><a href="${gmaps}">Directions in Google Maps</a></p>`;
       return;
@@ -243,7 +261,9 @@ function show(fromText, toText, { refit = true } = {}) {
     pin(dest, "#111", `${dest.name} (destination)`);
     bounds.extend([dest.lat, dest.lon]);
 
-    const live = usesHere ? `<div class="live">● Live: updates as you walk</div>` : "";
+    const live = !usesHere ? ""
+      : here ? `<div class="live">● Live: updates as you walk</div>`
+      : `<div class="sub">From ${esc(fallback.name)}. Turn on location to start from where you are.</div>`;
     if (routes.length === 1) {
       const r = routes[0];
       out.innerHTML = r.from === here && r.meters < ARRIVED_M
@@ -258,7 +278,9 @@ function show(fromText, toText, { refit = true } = {}) {
           ${esc(r.from.name)}: ${r.minutes} min</div>`).join("")}
         <p><a href="${gmaps}">Open in Google Maps</a></p>`;
     }
-    const params = new URLSearchParams({ from: routes.map((r) => r.from.id).join(","), to: dest.id });
+    const params = new URLSearchParams({
+      from: tokens.map((t) => (isHere(t) ? "here" : campus.findPlace(t)?.id || t)).join(","), to: dest.id });
+    if (usesHere && fallback) params.set("fallback", fallback.id);
     history.replaceState(null, "", `?${params}`);
     out.insertAdjacentHTML("beforeend", `<p><a href="3d.html?${params}">View in 3D</a></p>`);
     // On a phone the panel covers the bottom of the map; fit the route into the part above it.

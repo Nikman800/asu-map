@@ -35,6 +35,97 @@
     "noble-science-and-engineering-library": [
       "Noble",
       "Noble Library"
+    ],
+    "physical-science-b-wing": [
+      "PSB"
+    ],
+    "physical-science-c-wing": [
+      "PSC"
+    ],
+    "physical-science-d-wing": [
+      "PSD"
+    ],
+    "physical-science-e-wing": [
+      "PSE"
+    ],
+    "physical-science-f-wing": [
+      "PSF"
+    ],
+    "physical-science-g-wing": [
+      "PSG"
+    ],
+    "physical-science-h-wing": [
+      "PSH"
+    ],
+    "engineering-center-a-wing": [
+      "ECA"
+    ],
+    "engineering-center-b-wing": [
+      "ECB"
+    ],
+    "engineering-center-c-wing": [
+      "ECC"
+    ],
+    "engineering-center-d-wing": [
+      "ECD"
+    ],
+    "engineering-center-e-wing": [
+      "ECE"
+    ],
+    "engineering-center-f-wing": [
+      "ECF"
+    ],
+    "engineering-center-g-wing": [
+      "ECG"
+    ],
+    "life-sciences-b-wing": [
+      "LSB"
+    ],
+    "life-sciences-c-wing": [
+      "LSC"
+    ],
+    "life-sciences-d-wing": [
+      "LSD"
+    ],
+    "biodesign-institute-building-a": [
+      "BDA"
+    ],
+    "biodesign-institute-building-b": [
+      "BDB"
+    ],
+    "biodesign-institute-building-c": [
+      "BDC"
+    ],
+    "lattie-f-coor-hall": [
+      "COOR"
+    ],
+    "wexler-hall": [
+      "WXLR"
+    ],
+    "goldwater-center": [
+      "GWC"
+    ],
+    "engineering-research-center": [
+      "ERC"
+    ],
+    "psychology-building": [
+      "PSY"
+    ],
+    "psychology-north": [
+      "PSYN"
+    ],
+    "durham-hall": [
+      "LL",
+      "Language and Literature"
+    ],
+    "brickyard-artisan-courtyard": [
+      "BYAC"
+    ],
+    "college-avenue-commons": [
+      "CAVC"
+    ],
+    "west-hall": [
+      "WHALL"
     ]
   },
   "places": [],

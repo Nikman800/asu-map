@@ -128,13 +128,15 @@ try {
   if (froms.includes("here")) {
     // One position fix; the 2D map is the one that follows the student live.
     info.textContent = "Finding your location…";
-    const pos = await new Promise((resolve, reject) => {
-      if (!navigator.geolocation) reject(new Error("This browser can't share its location."));
-      navigator.geolocation.getCurrentPosition(resolve, () => reject(new Error("Couldn't get your location.")),
-        { enableHighAccuracy: true, timeout: 20000 });
+    const pos = await new Promise((resolve) => {
+      if (!navigator.geolocation) return resolve(null);
+      navigator.geolocation.getCurrentPosition(resolve, () => resolve(null), { enableHighAccuracy: true, timeout: 8000 });
     });
-    const here = campus.placeAt(pos.coords.latitude, pos.coords.longitude);
-    if (here.offMap) throw new Error("You're outside the campus model.");
+    let here = pos && campus.placeAt(pos.coords.latitude, pos.coords.longitude);
+    if (here?.offMap) throw new Error("You're outside the campus model.");
+    // No position (blocked or slow): start from the place the reminder link planned for, if it gave one.
+    here = here || (params.get("fallback") && campus.findPlace(params.get("fallback")));
+    if (!here) throw new Error("Couldn't get your location.");
     froms = froms.map((f) => (f === "here" ? here : f));
   }
   if (!froms.length) {
@@ -158,7 +160,7 @@ try {
     look(all.getCenter(new THREE.Vector3()),
       Math.max(60, size.y, size.x / Math.min(1, camera.aspect)) * (portrait ? 1.9 : 1.4));
 
-    const back = `index.html?${new URLSearchParams({ from: routes.map((r) => r.from.id).join(","), to: dest.id })}`;
+    const back = `index.html?${new URLSearchParams({ ...Object.fromEntries(params), to: dest.id })}`;
     info.className = "";
     info.innerHTML = routes.length === 1
       ? `<div class="summary">${routes[0].minutes} min walk</div>

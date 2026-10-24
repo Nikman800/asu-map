@@ -217,6 +217,7 @@ def main():
             "built": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%MZ"),
             "walk_m_per_min": 80,
             "meeting_spots": spots,
+            "map_url": overrides.get("map_url", ""),
         },
         "nodes": {str(n): [round(coords[n][0], 6), round(coords[n][1], 6)] for n in sorted(used)},
         "edges": [[str(a), str(b), *rest] for a, b, *rest in edges],
