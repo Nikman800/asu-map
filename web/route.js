@@ -46,8 +46,10 @@ export class CampusMap {
       let score = 0;
       for (const k of keys) {
         if (k.startsWith(q)) score = Math.max(score, 3);
-        else if (k.includes(q)) score = Math.max(score, 2);
-        else if (words.every((w) => k.includes(w))) score = Math.max(score, 1);
+        // Short queries are usually building codes: match them only at the start of a word, so "ECH"
+        // does not find "Technology".
+        else if (q.length > 4 ? k.includes(q) : ` ${k}`.includes(` ${q}`)) score = Math.max(score, 2);
+        else if (words.every((w) => (w.length > 4 ? k.includes(w) : ` ${k}`.includes(` ${w}`)))) score = Math.max(score, 1);
       }
       if (score) scored.push([score, -p.name.length, p]);
     }

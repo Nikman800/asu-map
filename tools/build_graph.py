@@ -118,13 +118,18 @@ def main():
         outline = [n for n in outline if n in coords]
         if not outline:
             continue
-        places.append({"name": t["name"], "ref": t.get("ref") or t.get("short_name") or "", "outline": outline})
+        # Other names OSM knows it by, e.g. alt_name "Life Sciences A-Wing" on "Life Sciences Center".
+        others = [n.strip() for k in ("alt_name", "short_name", "official_name", "old_name")
+                  for n in t.get(k, "").split(";") if n.strip()]
+        places.append({"name": t["name"], "ref": t.get("ref") or t.get("short_name") or "", "outline": outline,
+                       "aliases": others})
     # OSM often splits one building into several outlines; treat same-named ones as one place.
     merged = {}
     for p in places:
         key = p["name"].lower()
         if key in merged:
             merged[key]["outline"] += p["outline"]
+            merged[key]["aliases"] += p["aliases"]
             merged[key]["ref"] = merged[key]["ref"] or p["ref"]
         else:
             merged[key] = p

@@ -94,7 +94,9 @@ const layer = L.layerGroup().addTo(map);
 const meLayer = L.layerGroup().addTo(map);
 
 const campus = new CampusMap(await (await fetch("campus.json")).json());
-$("places").innerHTML = campus.places.map((p) => `<option value="${esc(p.name)}">${esc(p.id)}</option>`).join("");
+// The label carries codes and nicknames so typing "LSA" or "SDFC" suggests the building.
+$("places").innerHTML = campus.places
+  .map((p) => `<option value="${esc(p.name)}">${esc([p.id, ...p.aliases].join(" · "))}</option>`).join("");
 
 function esc(s) {
   return String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
